@@ -32,6 +32,7 @@ const PALETTE_ITEMS: {
       subItems: [
         { label: 'Dataset Load', value: 'dataset_load' },
         { label: 'Column Drop', value: 'column_drop' },
+        { label: 'Concatenate (Merge)', value: 'concatenate' },
         { label: 'Data Viewer', value: 'data_viewer' }
       ]
     },
@@ -76,6 +77,11 @@ const PALETTE_ITEMS: {
             { label: 'ResNet', value: 'ResNet' },
             { label: 'VGG', value: 'VGG' },
             { label: 'MobileNet', value: 'MobileNet' },
+            { label: 'Random Forest', value: 'RandomForest' },
+            { label: 'SVM', value: 'SVM' },
+            { label: 'Decision Tree', value: 'DecisionTree' },
+            { label: 'KNN', value: 'KNN' },
+            { label: 'Logistic Regression', value: 'LogisticRegression' },
           ]
         },
         {
@@ -86,6 +92,10 @@ const PALETTE_ITEMS: {
             { label: 'LSTM', value: 'LSTM' },
             { label: 'GRU', value: 'GRU' },
             { label: 'Transformer', value: 'Transformer' },
+            { label: 'Random Forest', value: 'RandomForestRegressor' },
+            { label: 'SVR', value: 'SVR' },
+            { label: 'Decision Tree', value: 'DecisionTreeRegressor' },
+            { label: 'XGBoost', value: 'XGBoost' },
           ]
         }
       ]
@@ -426,12 +436,54 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
       }
     }
 
-    // Case 2: Column Drop Node OR Data Viewer (Pass-through) OR Preprocess (Pass-through for now)
+    // Case 2: Column Drop / Concatenate / Data Viewer
     // Recursive call
+
+    // Special handling for Concatenate (Multiple Inputs)
+    if (parentNode.type === 'dataset' && parentNode.data.datasetSubtype === 'concatenate') {
+      const incomingEdges = edges.filter(e => e.target === nodeId);
+      if (incomingEdges.length === 0) return null;
+
+      const allData = incomingEdges.map(edge => {
+        const pNode = nodes.find(n => n.id === edge.source);
+        return pNode ? getUpstreamData(pNode.id) : null;
+      }).filter(d => d !== null);
+
+      if (allData.length === 0) return null;
+
+      // Merge Logic (Vertical Concatenation)
+      // Assuming same structure for simplicity.
+      // 1. Merge 'data' (string[][])
+      let mergedData: string[][] | undefined = undefined;
+      const firstData = allData.find(d => d!.data);
+      if (firstData && firstData.data) {
+        const headers = firstData.data[0];
+        let combinedRows: string[][] = [];
+
+        allData.forEach((d, idx) => {
+          if (d?.data) {
+            if (idx === 0) {
+              combinedRows = [...d.data];
+            } else {
+              // Skip header for subsequent datasets if they match
+              // Simple check: same length header?
+              if (d.data[0].length === headers.length) {
+                combinedRows.push(...d.data.slice(1));
+              }
+            }
+          }
+        });
+        mergedData = combinedRows;
+      }
+
+      return { data: mergedData };
+    }
+
+    // Normal single source recursion
     const upstreamData = getUpstreamData(parentNode.id);
     if (!upstreamData) return null;
 
-    // Apply transformations
+    // Apply Column Drop
     if (parentNode.type === 'dataset' && parentNode.data.datasetSubtype === 'column_drop') {
       const droppedColumns = parentNode.data.droppedColumns as string[] || [];
       if (droppedColumns.length === 0) return upstreamData;
@@ -457,7 +509,7 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
       }
     }
 
-    // Default: Return upstream data as is (e.g. for Viewer chaining or Preprocess skip)
+    // Default: Return upstream data as is
     return upstreamData;
   };
 
@@ -493,19 +545,19 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
       // Calculate start points
       let sx = sourceNode.position.x;
       let sy = sourceNode.position.y;
-      if (sourceHandle === 'right') { sx += 200; sy += 40; }
-      else if (sourceHandle === 'bottom') { sx += 100; sy += 80; }
+      if (sourceHandle === 'right') { sx += 240; sy += 50; }
+      else if (sourceHandle === 'bottom') { sx += 120; sy += 100; }
 
       // Calculate end points
       let tx = targetNode.position.x;
       let ty = targetNode.position.y;
-      if (targetHandle === 'left') { ty += 40; }
-      else if (targetHandle === 'top') { tx += 100; }
+      if (targetHandle === 'left') { ty += 50; }
+      else if (targetHandle === 'top') { tx += 120; }
 
       // Control points
       let cp1x = sx, cp1y = sy, cp2x = tx, cp2y = ty;
 
-      const curvature = 50;
+      const curvature = 60; // Increased curvature for larger nodes
       if (sourceHandle === 'right') cp1x += curvature;
       else if (sourceHandle === 'bottom') cp1y += curvature;
 
@@ -583,20 +635,20 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
         // Use updated connectionStartHandle state
         const handle = connectionStartHandle || 'right';
 
-        if (handle === 'right') { sx += 200; sy += 40; }
-        else if (handle === 'bottom') { sx += 100; sy += 80; }
+        if (handle === 'right') { sx += 240; sy += 50; }
+        else if (handle === 'bottom') { sx += 120; sy += 100; }
 
         const tx = cursorPos.x;
         const ty = cursorPos.y;
 
         let cp1x = sx, cp1y = sy, cp2x = tx, cp2y = ty;
-        const curvature = 50;
+        const curvature = 60;
 
         if (handle === 'right') cp1x += curvature;
         else if (handle === 'bottom') cp1y += curvature;
 
-        // Assume target is vaguely opposite or just adaptive? 
-        // For temp line, treat mouse as a generic target. 
+        // Assume target is vaguely opposite or just adaptive?
+        // For temp line, treat mouse as a generic target.
         // We can't know target handle yet, so just ease in from opposite of source?
         // Or just linear?
         // Let's guess target approach based on relative position.
@@ -845,34 +897,42 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
             const isSelected = selectedNodeId === node.id;
             const isSource = connectionStartId === node.id;
 
+            const isDataViewer = node.type === 'dataset' && node.data.datasetSubtype === 'data_viewer';
+            const incomingEdges = edges.filter(e => e.target === node.id);
+            const hasIncoming = incomingEdges.length > 0;
+
             return (
               <div
                 key={node.id}
                 onMouseDown={(e) => handleMouseDown(e, node.id)}
                 onDoubleClick={(e) => handleDoubleClick(e, node)}
-                className={`absolute w-[200px] h-[80px] rounded-xl shadow-md border-2 bg-white flex items-center p-3 transition-shadow z-10 select-none ${isSelected ? 'border-university-500 ring-2 ring-university-200' : 'border-gray-200 hover:border-gray-300'
+                className={`absolute w-[240px] h-[100px] rounded-xl shadow-md border-2 bg-white flex items-center p-3 transition-shadow z-10 select-none ${isSelected ? 'border-university-500 ring-2 ring-university-200' : 'border-gray-200 hover:border-gray-300'
                   } ${isSource ? 'ring-2 ring-green-400' : ''}`}
                 style={{ left: node.position.x, top: node.position.y }}
               >
                 {/* Input Handles */}
-                {/* Left */}
-                <div
-                  className="absolute -left-3 top-1/2 transform -translate-y-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-green-100 hover:border-green-500 cursor-pointer node-handle flex items-center justify-center z-20"
-                  title="입력 (Left)"
-                  onMouseUp={(e) => handleHandleMouseUp(e, node.id, 'left')}
-                  onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'left')}
-                >
-                  <div className="w-2 h-2 bg-gray-400 rounded-full pointer-events-none" />
-                </div>
-                {/* Top */}
-                <div
-                  className="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-green-100 hover:border-green-500 cursor-pointer node-handle flex items-center justify-center z-20"
-                  title="입력 (Top)"
-                  onMouseUp={(e) => handleHandleMouseUp(e, node.id, 'top')}
-                  onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'top')}
-                >
-                  <div className="w-2 h-2 bg-gray-400 rounded-full pointer-events-none" />
-                </div>
+                {/* Left - Show if normal node, OR not connected, OR connected at this handle */}
+                {(!isDataViewer || !hasIncoming || incomingEdges.some(e => (e.targetHandle || 'left') === 'left')) && (
+                  <div
+                    className="absolute -left-3 top-1/2 transform -translate-y-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-green-100 hover:border-green-500 cursor-pointer node-handle flex items-center justify-center z-20"
+                    title="입력 (Left)"
+                    onMouseUp={(e) => handleHandleMouseUp(e, node.id, 'left')}
+                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'left')}
+                  >
+                    <div className="w-2 h-2 bg-gray-400 rounded-full pointer-events-none" />
+                  </div>
+                )}
+                {/* Top - Show if normal node, OR not connected, OR connected at this handle */}
+                {(!isDataViewer || !hasIncoming || incomingEdges.some(e => e.targetHandle === 'top')) && (
+                  <div
+                    className="absolute -top-3 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-green-100 hover:border-green-500 cursor-pointer node-handle flex items-center justify-center z-20"
+                    title="입력 (Top)"
+                    onMouseUp={(e) => handleHandleMouseUp(e, node.id, 'top')}
+                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'top')}
+                  >
+                    <div className="w-2 h-2 bg-gray-400 rounded-full pointer-events-none" />
+                  </div>
+                )}
 
                 {/* Content */}
                 <div className={`p-2 rounded-lg mr-3 ${styleInfo.color}`}>
@@ -897,23 +957,27 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
 
                 {/* Output Handles */}
                 {/* Right */}
-                <div
-                  className={`absolute -right-3 top-1/2 transform -translate-y-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-blue-100 hover:border-blue-500 cursor-pointer node-handle flex items-center justify-center z-20 ${connectionStartId === node.id && connectionStartHandle === 'right' ? 'bg-blue-500 border-blue-600' : ''
-                    }`}
-                  title="출력 (Right)"
-                  onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'right')}
-                >
-                  <div className={`w-2 h-2 rounded-full pointer-events-none ${connectionStartId === node.id && connectionStartHandle === 'right' ? 'bg-white' : 'bg-gray-400'}`} />
-                </div>
+                {(!isDataViewer || !hasIncoming) && (
+                  <div
+                    className={`absolute -right-3 top-1/2 transform -translate-y-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-blue-100 hover:border-blue-500 cursor-pointer node-handle flex items-center justify-center z-20 ${connectionStartId === node.id && connectionStartHandle === 'right' ? 'bg-blue-500 border-blue-600' : ''
+                      }`}
+                    title="출력 (Right)"
+                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'right')}
+                  >
+                    <div className={`w-2 h-2 rounded-full pointer-events-none ${connectionStartId === node.id && connectionStartHandle === 'right' ? 'bg-white' : 'bg-gray-400'}`} />
+                  </div>
+                )}
                 {/* Bottom */}
-                <div
-                  className={`absolute -bottom-3 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-blue-100 hover:border-blue-500 cursor-pointer node-handle flex items-center justify-center z-20 ${connectionStartId === node.id && connectionStartHandle === 'bottom' ? 'bg-blue-500 border-blue-600' : ''
-                    }`}
-                  title="출력 (Bottom)"
-                  onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'bottom')}
-                >
-                  <div className={`w-2 h-2 rounded-full pointer-events-none ${connectionStartId === node.id && connectionStartHandle === 'bottom' ? 'bg-white' : 'bg-gray-400'}`} />
-                </div>
+                {(!isDataViewer || !hasIncoming) && (
+                  <div
+                    className={`absolute -bottom-3 left-1/2 transform -translate-x-1/2 w-6 h-6 bg-white border-2 border-gray-400 rounded-full hover:bg-blue-100 hover:border-blue-500 cursor-pointer node-handle flex items-center justify-center z-20 ${connectionStartId === node.id && connectionStartHandle === 'bottom' ? 'bg-blue-500 border-blue-600' : ''
+                      }`}
+                    title="출력 (Bottom)"
+                    onMouseDown={(e) => handleHandleMouseDown(e, node.id, 'bottom')}
+                  >
+                    <div className={`w-2 h-2 rounded-full pointer-events-none ${connectionStartId === node.id && connectionStartHandle === 'bottom' ? 'bg-white' : 'bg-gray-400'}`} />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -975,69 +1039,81 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
 
             {editingNode.type === 'preprocess' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">대상 컬럼 선택</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">대상 컬럼 (자동 감지됨)</label>
                 {(() => {
-                  const dataset = getUpstreamDataset(editingNode.id);
-                  if (!dataset) {
-                    return <p className="text-sm text-gray-500">연결된 데이터셋이 없습니다. 데이터셋 노드를 먼저 연결해주세요.</p>;
+                  // Use getUpstreamData instead of getUpstreamDataset to respect Column Drop nodes
+                  const upstreamData = getUpstreamData(editingNode.id);
+
+                  if (!upstreamData || (!upstreamData.data && !upstreamData.splits)) {
+                    return <p className="text-sm text-gray-500">연결된 데이터가 없습니다. 데이터셋 노드를 먼저 연결해주세요.</p>;
                   }
 
-                  const columns = inferColumnTypes(dataset);
-                  const isScaler = ['Normalization', 'Standardization', 'Imputer'].includes(editingNode.data.modelType || '');
-                  // const targetColumns = isScaler ? columns.numeric : columns.categorical;
+                  // Infer columns directly from the data
+                  const inferColumnsFromData = () => {
+                    let rows: string[][] = [];
+                    if (upstreamData.data && upstreamData.data.length > 0) {
+                      rows = upstreamData.data;
+                    } else if (upstreamData.splits && upstreamData.splits.train && upstreamData.splits.train.length > 0) {
+                      rows = upstreamData.splits.train;
+                    }
 
-                  // For Imputer, we might want to allow both, but let's stick to numeric for now based on request ("Scaler -> Numeric")
-                  // Wait, user said "Numerical, Categorical Scaler". Typically Categorical uses Encoder (OneHot/Label).
-                  // Let's assume:
-                  // Normalization/Standardization -> Numeric
-                  // OneHot -> Categorical
-                  // Imputer -> Both (but let's show all for Imputer or just Numeric if it's mean/median)
+                    if (rows.length < 2) return { numeric: [], categorical: [] };
 
-                  // User request: "numeric, categorical scaler should show respective columns"
-                  // Renaming 'modelType' to 'preprocessType' in my head but code uses modelType for subItems value.
+                    const headers = rows[0];
+                    const firstRow = rows[1];
+                    const numeric: string[] = [];
+                    const categorical: string[] = [];
 
-                  const type = editingNode.data.preprocessType || editingNode.data.modelType; // Fallback
+                    headers.forEach((header, index) => {
+                      const value = firstRow[index];
+                      if (!isNaN(Number(value)) && value.trim() !== '') {
+                        numeric.push(header);
+                      } else {
+                        categorical.push(header);
+                      }
+                    });
+                    return { numeric, categorical };
+                  };
 
-                  let displayColumns: string[] = [];
+                  const columns = inferColumnsFromData();
+
+                  const type = editingNode.data.preprocessType || editingNode.data.modelType;
+
+                  let autoDetectedColumns: string[] = [];
+                  let typeLabel = "";
+
                   if (['Normalization', 'Standardization'].includes(type || '')) {
-                    displayColumns = columns.numeric;
+                    autoDetectedColumns = columns.numeric;
+                    typeLabel = "수치형(Numeric)";
                   } else if (['OneHot'].includes(type || '')) {
-                    displayColumns = columns.categorical;
+                    autoDetectedColumns = columns.categorical;
+                    typeLabel = "범주형(Categorical)";
                   } else if (type === 'Imputer') {
-                    displayColumns = [...columns.numeric, ...columns.categorical];
+                    autoDetectedColumns = [...columns.numeric, ...columns.categorical];
+                    typeLabel = "전체(All)";
                   } else {
-                    displayColumns = [...columns.numeric, ...columns.categorical];
+                    autoDetectedColumns = [...columns.numeric, ...columns.categorical];
+                    typeLabel = "전체(All)";
                   }
 
                   return (
-                    <div className="border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto bg-gray-50">
-                      {displayColumns.length === 0 && <p className="text-xs text-gray-400">선택 가능한 컬럼이 없습니다.</p>}
-                      {displayColumns.map(col => (
-                        <label key={col} className="flex items-center space-x-2 py-1 cursor-pointer hover:bg-gray-100 rounded px-1">
-                          <input
-                            type="checkbox"
-                            checked={(editingNode.data.selectedColumns || []).includes(col)}
-                            onChange={(e) => {
-                              const current = editingNode.data.selectedColumns || [];
-                              let next: string[];
-                              if (e.target.checked) {
-                                next = [...current, col];
-                              } else {
-                                next = current.filter(c => c !== col);
-                              }
-                              updateNodeData({ selectedColumns: next });
-                            }}
-                            className="rounded text-university-600 focus:ring-university-500"
-                          />
-                          <span className="text-sm text-gray-700">{col}</span>
-                        </label>
-                      ))}
+                    <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                      <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">
+                        {typeLabel} 컬럼 ({autoDetectedColumns.length}개)
+                      </p>
+                      <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                        {autoDetectedColumns.length === 0 && <p className="text-xs text-gray-400">해당 타입의 컬럼이 없습니다.</p>}
+                        {autoDetectedColumns.map(col => (
+                          <span key={col} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            {col}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   );
                 })()}
-                <p className="text-xs text-gray-500 mt-1">
-                  {editingNode.data.modelType === 'OneHot' ? '범주형 데이터만 선택 가능합니다.' :
-                    ['Normalization', 'Standardization'].includes(editingNode.data.modelType || '') ? '수치형 데이터만 선택 가능합니다.' : '전처리할 컬럼을 선택하세요.'}
+                <p className="text-xs text-gray-500 mt-2">
+                  선택한 전처리 방식에 적합한 컬럼이 자동으로 선택됩니다.
                 </p>
               </div>
             )}
@@ -1092,7 +1168,6 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
                 {/* Column Drop UI */}
                 {editingNode.data.datasetSubtype === 'column_drop' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">제거할 컬럼 선택</label>
                     {(() => {
                       const dataset = getUpstreamDataset(editingNode.id);
                       if (!dataset) {
@@ -1101,34 +1176,69 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
 
                       const columns = inferColumnTypes(dataset);
                       const allColumns = [...columns.numeric, ...columns.categorical];
+                      const droppedColumns = editingNode.data.droppedColumns as string[] || [];
+                      const targetColumn = editingNode.data.targetColumn as string | undefined;
 
                       return (
-                        <div className="border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto bg-gray-50">
-                          {allColumns.length === 0 && <p className="text-xs text-gray-400">선택 가능한 컬럼이 없습니다.</p>}
-                          {allColumns.map(col => (
-                            <label key={col} className="flex items-center space-x-2 py-1 cursor-pointer hover:bg-gray-100 rounded px-1">
-                              <input
-                                type="checkbox"
-                                checked={(editingNode.data.droppedColumns || []).includes(col)}
-                                onChange={(e) => {
-                                  const current = editingNode.data.droppedColumns || [];
-                                  let next: string[];
-                                  if (e.target.checked) {
-                                    next = [...current, col];
-                                  } else {
-                                    next = current.filter(c => c !== col);
-                                  }
-                                  updateNodeData({ droppedColumns: next });
-                                }}
-                                className="rounded text-red-600 focus:ring-red-500"
-                              />
-                              <span className="text-sm text-gray-700">{col}</span>
-                            </label>
-                          ))}
+                        <div className="space-y-4">
+                          {/* Drop Columns Section */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">제거할 컬럼 선택 (Drop)</label>
+                            <div className="border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto bg-gray-50">
+                              {allColumns.length === 0 && <p className="text-xs text-gray-400">선택 가능한 컬럼이 없습니다.</p>}
+                              {allColumns.map(col => (
+                                <label key={`drop-${col}`} className="flex items-center space-x-2 py-1 cursor-pointer hover:bg-gray-100 rounded px-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={droppedColumns.includes(col)}
+                                    disabled={targetColumn === col} // Disable if it is the target
+                                    onChange={(e) => {
+                                      const current = editingNode.data.droppedColumns || [];
+                                      let next: string[];
+                                      if (e.target.checked) {
+                                        next = [...current, col];
+                                      } else {
+                                        next = current.filter(c => c !== col);
+                                      }
+                                      updateNodeData({ droppedColumns: next });
+                                    }}
+                                    className="rounded text-red-600 focus:ring-red-500"
+                                  />
+                                  <span className={`text-sm ${targetColumn === col ? 'text-gray-400 decoration-line-through' : 'text-gray-700'}`}>{col}</span>
+                                  {targetColumn === col && <span className="text-xs text-blue-500 ml-2">(Target)</span>}
+                                </label>
+                              ))}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">체크한 컬럼은 데이터에서 제거됩니다.</p>
+                          </div>
+
+                          {/* Target Column Section */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">타겟 컬럼 선택 (Target)</label>
+                            <div className="border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto bg-gray-50">
+                              {allColumns.length === 0 && <p className="text-xs text-gray-400">선택 가능한 컬럼이 없습니다.</p>}
+                              {allColumns.map(col => (
+                                <label key={`target-${col}`} className="flex items-center space-x-2 py-1 cursor-pointer hover:bg-gray-100 rounded px-1">
+                                  <input
+                                    type="radio"
+                                    name="targetColumn"
+                                    checked={targetColumn === col}
+                                    disabled={droppedColumns.includes(col)} // Disable if it is dropped
+                                    onChange={() => {
+                                      updateNodeData({ targetColumn: col });
+                                    }}
+                                    className="text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className={`text-sm ${droppedColumns.includes(col) ? 'text-gray-400 decoration-line-through' : 'text-gray-700'}`}>{col}</span>
+                                  {droppedColumns.includes(col) && <span className="text-xs text-red-500 ml-2">(Dropped)</span>}
+                                </label>
+                              ))}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">예측하려는 정답(Label) 컬럼을 선택하세요.</p>
+                          </div>
                         </div>
                       );
                     })()}
-                    <p className="text-xs text-gray-500 mt-1">체크한 컬럼은 데이터에서 제거됩니다.</p>
                   </div>
                 )}
               </>
@@ -1150,7 +1260,44 @@ const FlowWorkspace: React.FC<FlowWorkspaceProps> = ({ user, project, onBack }) 
             )}
 
             <div className="pt-4 flex justify-end">
-              <Button variant="primary" onClick={() => setEditingNode(null)}>
+              <Button variant="primary" onClick={() => {
+                // Auto-save inferred columns for Preprocess nodes on close
+                if (editingNode.type === 'preprocess') {
+                  // Re-run inference to get current columns based on type
+                  const upstreamData = getUpstreamData(editingNode.id);
+                  if (upstreamData) {
+                    let rows: string[][] = [];
+                    if (upstreamData.data && upstreamData.data.length > 0) rows = upstreamData.data;
+                    else if (upstreamData.splits && upstreamData.splits.train) rows = upstreamData.splits.train;
+
+                    if (rows.length >= 2) {
+                      const headers = rows[0];
+                      const firstRow = rows[1];
+                      const numeric: string[] = [];
+                      const categorical: string[] = [];
+                      headers.forEach((header, index) => {
+                        const value = firstRow[index];
+                        if (!isNaN(Number(value)) && value.trim() !== '') numeric.push(header);
+                        else categorical.push(header);
+                      });
+
+                      const type = editingNode.data.preprocessType || editingNode.data.modelType;
+                      let autoSelected: string[] = [];
+                      if (['Normalization', 'Standardization'].includes(type || '')) {
+                        autoSelected = numeric;
+                      } else if (['OneHot'].includes(type || '')) {
+                        autoSelected = categorical;
+                      } else {
+                        autoSelected = [...numeric, ...categorical];
+                      }
+
+                      // Update the node directly in the state
+                      setNodes(nodes.map(n => n.id === editingNode.id ? { ...n, data: { ...n.data, selectedColumns: autoSelected } } : n));
+                    }
+                  }
+                }
+                setEditingNode(null);
+              }}>
                 완료
               </Button>
             </div>
